@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { CssBridgeDefinitionProvider } from './providers/definition';
+import { CssBridgeCodeActionProvider } from './providers/codeAction';
 import { peekCssRule } from './providers/peek';
 import { getAttributeAtCursor } from './parsers/jsxParser';
 import { findCssLocations } from './utils/findLocations';
@@ -19,6 +22,14 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerDefinitionProvider(
       DOC_SELECTOR,
       new CssBridgeDefinitionProvider()
+    )
+  );
+
+  // CodeAction — create rule / create CSS file + import
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      DOC_SELECTOR,
+      new CssBridgeCodeActionProvider()
     )
   );
 
@@ -54,6 +65,69 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
+  // Execute: append rule to existing CSS file + jump cursor into block
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'cssBridge.createRule',
+      async (cssFile: string, selector: string) => {
+        const rule = `\n${selector} {\n\t\n}\n`;
+        fs.appendFileSync(cssFile, rule, 'utf-8');
+        invalidateCache(cssFile);
+
+        const uri = vscode.Uri.file(cssFile);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const config = vscode.workspace.getConfiguration('cssBridge');
+        const openLocation = config.get<string>('openLocation', 'right');
+
+        // Find the line of the newly appended rule
+        const lines = doc.getText().split('\n');
+        const selectorLine = lines.findIndex(l => l.trim() === selector);
+        const cursorLine = selectorLine >= 0 ? selectorLine + 1 : doc.lineCount - 2;
+        const pos = new vscode.Position(cursorLine, 1);
+
+        await openInLocation(uri, pos, openLocation);
+      }
+    )
+  );
+
+  // Execute: create new CSS file + add import + append rule + jump
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'cssBridge.createFileAndImport',
+      async (jsxFile: string, cssFile: string, selector: string) => {
+        // Create CSS file with initial rule
+        const rule = `${selector} {\n\t\n}\n`;
+        fs.writeFileSync(cssFile, rule, 'utf-8');
+
+        // Add import to JSX file (after last existing import line)
+        const jsxDoc = await vscode.workspace.openTextDocument(jsxFile);
+        const jsxText = jsxDoc.getText();
+        const lines = jsxText.split('\n');
+        let lastImportLine = -1;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trimStart().startsWith('import ')) lastImportLine = i;
+        }
+        const insertLine = lastImportLine + 1;
+        const importStatement = `import './${path.basename(cssFile)}';\n`;
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(
+          vscode.Uri.file(jsxFile),
+          new vscode.Position(insertLine, 0),
+          importStatement
+        );
+        await vscode.workspace.applyEdit(edit);
+
+        // Open CSS file and place cursor inside the rule block
+        const cssUri = vscode.Uri.file(cssFile);
+        const cursorPos = new vscode.Position(1, 1); // inside selector { | }
+        const config = vscode.workspace.getConfiguration('cssBridge');
+        const openLocation = config.get<string>('openLocation', 'right');
+        await openInLocation(cssUri, cursorPos, openLocation);
+      }
+    )
+  );
+
   // Invalidate CSS cache when files change
   const cssWatcher = vscode.workspace.createFileSystemWatcher('**/*.css');
   context.subscriptions.push(
@@ -80,7 +154,6 @@ async function openInLocation(
     return;
   }
 
-  // left / above / below — split current editor in the given direction, then open
   const splitCommand: Record<string, string> = {
     left:  'workbench.action.splitEditorLeft',
     above: 'workbench.action.splitEditorUp',

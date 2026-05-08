@@ -20,6 +20,14 @@
       {
         "command": "cssBridge.peekRule",
         "title": "CSS Bridge: Peek CSS Rule"
+      },
+      {
+        "command": "cssBridge.createRule",
+        "title": "CSS Bridge: Create CSS Rule"
+      },
+      {
+        "command": "cssBridge.createFileAndImport",
+        "title": "CSS Bridge: Create CSS File and Import"
       }
     ],
     "configuration": {
