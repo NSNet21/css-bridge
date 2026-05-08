@@ -9,7 +9,13 @@
   },
   "categories": ["Other"],
   "keywords": ["css", "jsx", "tsx", "className", "navigate", "peek"],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescriptreact",
+    "onLanguage:css"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [

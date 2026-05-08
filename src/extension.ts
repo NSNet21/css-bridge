@@ -16,7 +16,12 @@ const DOC_SELECTOR: vscode.DocumentSelector = [
   { language: 'typescriptreact' },
 ];
 
+export const out = vscode.window.createOutputChannel('CSS Bridge');
+
 export function activate(context: vscode.ExtensionContext) {
+  out.appendLine('CSS Bridge activated');
+  context.subscriptions.push(out);
+
   // F12 / Ctrl+Click — Go to Definition
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(
