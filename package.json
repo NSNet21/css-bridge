@@ -27,9 +27,16 @@
       "properties": {
         "cssBridge.openLocation": {
           "type": "string",
-          "enum": ["beside", "active"],
-          "default": "beside",
-          "description": "Open CSS file side-by-side or in active tab"
+          "enum": ["active", "right", "left", "above", "below"],
+          "enumDescriptions": [
+            "Replace current tab",
+            "Open to the right",
+            "Open to the left",
+            "Open above",
+            "Open below"
+          ],
+          "default": "right",
+          "description": "Where to open the CSS file when jumping"
         },
         "cssBridge.autoCreateImport": {
           "type": "boolean",

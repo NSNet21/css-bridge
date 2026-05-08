@@ -41,20 +41,15 @@ export function activate(context: vscode.ExtensionContext) {
         const locations = findCssLocations(editor.document, attr);
         if (locations.length === 0) return;
 
-        const config = vscode.workspace.getConfiguration('cssBridge');
-        const openBeside = config.get<string>('openLocation') === 'beside';
-        const viewColumn = openBeside ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active;
-
         const target = locations.length === 1
           ? locations[0]
           : await showDisambiguationPick(locations);
 
         if (!target) return;
 
-        await vscode.window.showTextDocument(target.uri, {
-          selection: new vscode.Range(target.range.start, target.range.start),
-          viewColumn,
-        });
+        const config = vscode.workspace.getConfiguration('cssBridge');
+        const openLocation = config.get<string>('openLocation', 'right');
+        await openInLocation(target.uri, target.range.start, openLocation);
       }
     )
   );
@@ -66,6 +61,34 @@ export function activate(context: vscode.ExtensionContext) {
     cssWatcher.onDidChange(uri => invalidateCache(uri.fsPath)),
     cssWatcher.onDidDelete(uri => invalidateCache(uri.fsPath)),
   );
+}
+
+async function openInLocation(
+  uri: vscode.Uri,
+  position: vscode.Position,
+  location: string
+): Promise<void> {
+  const selection = new vscode.Range(position, position);
+
+  if (location === 'active') {
+    await vscode.window.showTextDocument(uri, { selection, viewColumn: vscode.ViewColumn.Active });
+    return;
+  }
+
+  if (location === 'right') {
+    await vscode.window.showTextDocument(uri, { selection, viewColumn: vscode.ViewColumn.Beside });
+    return;
+  }
+
+  // left / above / below — split current editor in the given direction, then open
+  const splitCommand: Record<string, string> = {
+    left:  'workbench.action.splitEditorLeft',
+    above: 'workbench.action.splitEditorUp',
+    below: 'workbench.action.splitEditorDown',
+  };
+
+  await vscode.commands.executeCommand(splitCommand[location]);
+  await vscode.window.showTextDocument(uri, { selection, viewColumn: vscode.ViewColumn.Active });
 }
 
 export function deactivate() {}
