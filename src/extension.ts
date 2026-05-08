@@ -1,13 +1,16 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { CssBridgeDefinitionProvider } from './providers/definition';
+import { CssBridgeDefinitionProvider, getCssTokenAtCursor, findJsxLocationsForSelector } from './providers/definition';
 import { CssBridgeCodeActionProvider } from './providers/codeAction';
+import { JsxCompletionProvider, CssCompletionProvider } from './providers/completion';
+import { CssBridgeRenameProvider } from './providers/rename';
 import { peekCssRule } from './providers/peek';
 import { getAttributeAtCursor } from './parsers/jsxParser';
 import { findCssLocations } from './utils/findLocations';
 import { showDisambiguationPick } from './utils/quickPick';
 import { invalidateCache } from './parsers/cssParser';
+import { openInLocation } from './utils/openFile';
 
 const DOC_SELECTOR: vscode.DocumentSelector = [
   { language: 'javascript' },
@@ -22,10 +25,19 @@ export function activate(context: vscode.ExtensionContext) {
   out.appendLine('CSS Bridge activated');
   context.subscriptions.push(out);
 
-  // F12 / Ctrl+Click — Go to Definition
+  // F12 / Ctrl+Click — Go to Definition (JSX/TSX→CSS and CSS→JSX via Ctrl+Click)
+  // Note: for #id selectors in CSS, Ctrl+Click shows 2 results (CSS rule + JSX) because
+  // VS Code's built-in CSS provider also returns the CSS self-reference — unavoidable.
+  // F12 in CSS uses the jumpToRule command override instead, which shows JSX only.
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(
-      DOC_SELECTOR,
+      [
+        { language: 'javascript' },
+        { language: 'typescript' },
+        { language: 'javascriptreact' },
+        { language: 'typescriptreact' },
+        { language: 'css' },
+      ],
       new CssBridgeDefinitionProvider()
     )
   );
@@ -47,12 +59,37 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Explicit Jump — respects openLocation setting + custom QuickPick for disambiguation
+  // Overrides F12 in JSX/TSX/CSS; falls through to built-in when not on className/id/selector
   context.subscriptions.push(
     vscode.commands.registerTextEditorCommand(
       'cssBridge.jumpToRule',
       async (editor) => {
+        const config = vscode.workspace.getConfiguration('cssBridge');
+        const openLocation = config.get<string>('openLocation', 'beside');
+
+        // CSS → JSX: F12 on .selector / #selector in a CSS file
+        if (editor.document.languageId === 'css') {
+          const token = getCssTokenAtCursor(editor.document, editor.selection.active);
+          if (!token) {
+            await vscode.commands.executeCommand('editor.action.revealDefinition');
+            return;
+          }
+          out.appendLine(`[jump] CSS→JSX ${token.type}="${token.value}"`);
+          const locs = findJsxLocationsForSelector(editor.document.fileName, token.type, token.value);
+          out.appendLine(`[jump] CSS→JSX found ${locs.length} location(s)`);
+          if (locs.length === 0) return;
+          const target = locs.length === 1 ? locs[0] : await showDisambiguationPick(locs);
+          if (!target) return;
+          await openInLocation(target.uri, target.range.start, openLocation);
+          return;
+        }
+
+        // JSX/TSX → CSS
         const attr = getAttributeAtCursor(editor.document, editor.selection.active);
-        if (!attr) return;
+        if (!attr) {
+          await vscode.commands.executeCommand('editor.action.revealDefinition');
+          return;
+        }
 
         const locations = findCssLocations(editor.document, attr);
         if (locations.length === 0) return;
@@ -62,9 +99,6 @@ export function activate(context: vscode.ExtensionContext) {
           : await showDisambiguationPick(locations);
 
         if (!target) return;
-
-        const config = vscode.workspace.getConfiguration('cssBridge');
-        const openLocation = config.get<string>('openLocation', 'right');
         await openInLocation(target.uri, target.range.start, openLocation);
       }
     )
@@ -78,20 +112,28 @@ export function activate(context: vscode.ExtensionContext) {
         const uri = vscode.Uri.file(cssFile);
         const doc = await vscode.workspace.openTextDocument(uri);
 
-        // Insert via WorkspaceEdit so VS Code tracks exact position
         const endPos = doc.lineAt(doc.lineCount - 1).range.end;
         const rule = `\n${selector} {\n\t\n}\n`;
         const edit = new vscode.WorkspaceEdit();
         edit.insert(uri, endPos, rule);
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
-
         invalidateCache(cssFile);
 
-        // Cursor inside braces: endPos.line + 1 = selector line, +2 = \t line
-        const cursorPos = new vscode.Position(endPos.line + 2, 1);
+        // Do NOT save here — format-on-save would strip the empty indent line,
+        // shifting the cursor onto `}` instead of inside the block.
+        // Search backwards in the post-edit live doc for the selector we added.
+        let cursorLine = endPos.line + 2; // fallback
+        for (let i = doc.lineCount - 1; i >= 0; i--) {
+          if (doc.lineAt(i).text.trimEnd() === `${selector} {`) {
+            cursorLine = i + 1;
+            break;
+          }
+        }
+
+        const indentLen = doc.lineAt(cursorLine).text.length;
+        const cursorPos = new vscode.Position(cursorLine, indentLen);
         const config = vscode.workspace.getConfiguration('cssBridge');
-        const openLocation = config.get<string>('openLocation', 'right');
+        const openLocation = config.get<string>('openLocation', 'beside');
         await openInLocation(uri, cursorPos, openLocation);
       }
     )
@@ -129,9 +171,41 @@ export function activate(context: vscode.ExtensionContext) {
         const cssUri = vscode.Uri.file(cssFile);
         const cursorPos = new vscode.Position(1, 1); // inside selector { | }
         const config = vscode.workspace.getConfiguration('cssBridge');
-        const openLocation = config.get<string>('openLocation', 'right');
+        const openLocation = config.get<string>('openLocation', 'beside');
         await openInLocation(cssUri, cursorPos, openLocation);
       }
+    )
+  );
+
+  // F2 — Project-wide Rename (JSX/TSX and CSS, scoped to nearest package.json)
+  context.subscriptions.push(
+    vscode.languages.registerRenameProvider(
+      [
+        { language: 'javascript' },
+        { language: 'typescript' },
+        { language: 'javascriptreact' },
+        { language: 'typescriptreact' },
+        { language: 'css' },
+      ],
+      new CssBridgeRenameProvider()
+    )
+  );
+
+  // Autocomplete — JSX/TSX: suggest selectors from imported CSS files
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      DOC_SELECTOR,
+      new JsxCompletionProvider(),
+      '"', "'"
+    )
+  );
+
+  // Autocomplete — CSS: suggest class/id names from JSX/TSX/JS/TS files in workspace
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'css' },
+      new CssCompletionProvider(),
+      '.', '#'
     )
   );
 
@@ -142,33 +216,6 @@ export function activate(context: vscode.ExtensionContext) {
     cssWatcher.onDidChange(uri => invalidateCache(uri.fsPath)),
     cssWatcher.onDidDelete(uri => invalidateCache(uri.fsPath)),
   );
-}
-
-async function openInLocation(
-  uri: vscode.Uri,
-  position: vscode.Position,
-  location: string
-): Promise<void> {
-  const selection = new vscode.Range(position, position);
-
-  if (location === 'active') {
-    await vscode.window.showTextDocument(uri, { selection, viewColumn: vscode.ViewColumn.Active });
-    return;
-  }
-
-  if (location === 'right') {
-    await vscode.window.showTextDocument(uri, { selection, viewColumn: vscode.ViewColumn.Beside });
-    return;
-  }
-
-  const splitCommand: Record<string, string> = {
-    left:  'workbench.action.splitEditorLeft',
-    above: 'workbench.action.splitEditorUp',
-    below: 'workbench.action.splitEditorDown',
-  };
-
-  await vscode.commands.executeCommand(splitCommand[location]);
-  await vscode.window.showTextDocument(uri, { selection, viewColumn: vscode.ViewColumn.Active });
 }
 
 export function deactivate() {}

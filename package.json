@@ -2,11 +2,16 @@
   "name": "css-bridge",
   "displayName": "CSS Bridge",
   "description": "Jump, peek, create, and rename CSS rules directly from JS/TS/JSX/TSX",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "publisher": "nsnet",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NSNet21/css-bridge"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
+  "icon": "icon.png",
   "categories": ["Other"],
   "keywords": ["css", "jsx", "tsx", "className", "navigate", "peek"],
   "activationEvents": [
@@ -41,15 +46,12 @@
       "properties": {
         "cssBridge.openLocation": {
           "type": "string",
-          "enum": ["active", "right", "left", "above", "below"],
+          "enum": ["active", "beside"],
           "enumDescriptions": [
             "Replace current tab",
-            "Open to the right",
-            "Open to the left",
-            "Open above",
-            "Open below"
+            "Open in a split panel beside the current editor"
           ],
-          "default": "right",
+          "default": "beside",
           "description": "Where to open the CSS file when jumping"
         },
         "cssBridge.autoCreateImport": {
@@ -64,6 +66,16 @@
         "command": "cssBridge.peekRule",
         "key": "ctrl+k ctrl+p",
         "when": "editorTextFocus && resourceExtname =~ /\\.(js|ts|jsx|tsx)$/"
+      },
+      {
+        "command": "cssBridge.jumpToRule",
+        "key": "f12",
+        "when": "editorTextFocus && resourceExtname =~ /\\.(js|ts|jsx|tsx|css)$/"
+      },
+      {
+        "command": "editor.action.rename",
+        "key": "alt+r",
+        "when": "editorTextFocus && resourceExtname =~ /\\.(js|ts|jsx|tsx|css)$/"
       }
     ]
   },
