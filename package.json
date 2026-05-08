@@ -4,6 +4,7 @@
   "description": "Jump, peek, create, and rename CSS rules directly from JS/TS/JSX/TSX",
   "version": "1.0.0",
   "publisher": "nsnet",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/NSNet21/css-bridge"
