@@ -75,22 +75,24 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       'cssBridge.createRule',
       async (cssFile: string, selector: string) => {
-        const rule = `\n${selector} {\n\t\n}\n`;
-        fs.appendFileSync(cssFile, rule, 'utf-8');
-        invalidateCache(cssFile);
-
         const uri = vscode.Uri.file(cssFile);
         const doc = await vscode.workspace.openTextDocument(uri);
+
+        // Insert via WorkspaceEdit so VS Code tracks exact position
+        const endPos = doc.lineAt(doc.lineCount - 1).range.end;
+        const rule = `\n${selector} {\n\t\n}\n`;
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(uri, endPos, rule);
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+
+        invalidateCache(cssFile);
+
+        // Cursor inside braces: endPos.line + 1 = selector line, +2 = \t line
+        const cursorPos = new vscode.Position(endPos.line + 2, 1);
         const config = vscode.workspace.getConfiguration('cssBridge');
         const openLocation = config.get<string>('openLocation', 'right');
-
-        // Find the line of the newly appended rule
-        const lines = doc.getText().split('\n');
-        const selectorLine = lines.findIndex(l => l.trim() === selector);
-        const cursorLine = selectorLine >= 0 ? selectorLine + 1 : doc.lineCount - 2;
-        const pos = new vscode.Position(cursorLine, 1);
-
-        await openInLocation(uri, pos, openLocation);
+        await openInLocation(uri, cursorPos, openLocation);
       }
     )
   );
