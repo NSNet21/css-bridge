@@ -1,0 +1,68 @@
+{
+  "name": "css-bridge",
+  "displayName": "CSS Bridge",
+  "description": "Jump, peek, create, and rename CSS rules directly from JS/TS/JSX/TSX",
+  "version": "0.1.0",
+  "publisher": "nsnet",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["css", "jsx", "tsx", "className", "navigate", "peek"],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cssBridge.jumpToRule",
+        "title": "CSS Bridge: Jump to CSS Rule"
+      },
+      {
+        "command": "cssBridge.peekRule",
+        "title": "CSS Bridge: Peek CSS Rule"
+      }
+    ],
+    "configuration": {
+      "title": "CSS Bridge",
+      "properties": {
+        "cssBridge.openLocation": {
+          "type": "string",
+          "enum": ["beside", "active"],
+          "default": "beside",
+          "description": "Open CSS file side-by-side or in active tab"
+        },
+        "cssBridge.autoCreateImport": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow auto-creating CSS file and adding import statement"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "cssBridge.peekRule",
+        "key": "ctrl+k ctrl+p",
+        "when": "editorTextFocus && resourceExtname =~ /\\.(js|ts|jsx|tsx)$/"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "vsce package",
+    "compile": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "@types/babel__traverse": "^7.20.0",
+    "typescript": "^5.3.0",
+    "esbuild": "^0.20.0",
+    "@vscode/vsce": "^2.24.0"
+  },
+  "dependencies": {
+    "postcss": "^8.4.0",
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0"
+  }
+}
