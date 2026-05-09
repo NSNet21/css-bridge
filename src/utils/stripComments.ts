@@ -5,14 +5,61 @@
 // Handles:
 //   - Line comments      // ...
 //   - Block comments     /* ... */
-//   - JSX block comments {/* ... */}  (the inner /* */ is caught by the block rule;
-//                                       the outer braces are left alone)
+//   - JSX block comments {/* ... */}
 //
-// Not handled (acceptable trade-off for an attribute-regex scan):
-//   - Comment-like sequences inside string/template literals are also blanked.
-//     False-negative is fine — we only blank, never insert content.
+// Crucially, this scanner is **string-aware** — `/*` inside a string literal
+// (e.g. `'@styles/*'`, `'src/**\/*'`, `"foo /* bar"`) is not treated as a
+// comment opener. The naive regex `/\/\*[\s\S]*?\*\//g` ate everything from
+// `'@styles/*'` (line 2) to `*/` of a real JSX comment (line 11), wiping out
+// all the JSX in between including the className we wanted to detect.
 export function stripComments(src: string): string {
-  let out = src.replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ' '));
-  out = out.replace(/\/\/[^\n]*/g, m => ' '.repeat(m.length));
+  let out = '';
+  let i = 0;
+  const n = src.length;
+
+  while (i < n) {
+    const c = src[i];
+
+    // String / template literal — copy verbatim, honour escapes
+    if (c === '"' || c === "'" || c === '`') {
+      const quote = c;
+      out += c;
+      i++;
+      while (i < n) {
+        if (src[i] === '\\' && i + 1 < n) {
+          out += src[i] + src[i + 1];
+          i += 2;
+          continue;
+        }
+        out += src[i];
+        if (src[i] === quote) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+
+    // Block comment — blank with spaces, keep newlines so line numbers stay
+    if (c === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end === -1 ? n : end + 2;
+      for (let j = i; j < stop; j++) {
+        out += src[j] === '\n' ? '\n' : ' ';
+      }
+      i = stop;
+      continue;
+    }
+
+    // Line comment — blank to end of line, keep the trailing newline
+    if (c === '/' && src[i + 1] === '/') {
+      while (i < n && src[i] !== '\n') {
+        out += ' ';
+        i++;
+      }
+      continue;
+    }
+
+    out += c;
+    i++;
+  }
   return out;
 }

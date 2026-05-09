@@ -56,6 +56,21 @@ Navigate, create, and rename CSS rules directly from your JSX/TSX — without le
 
 ## Release Notes
 
+### 1.1.0
+
+**New features:**
+- **Workspace CSS Union** — child components now see CSS imported by ancestors. Common case: `App.tsx` imports `globals.css`, child component uses `className="container"` without re-importing. F12 / Hover / Autocomplete / Code Action all work across the project. Toggle via `cssBridge.includeWorkspaceCss` (default `true`).
+- **Aliased imports** — `import '@/styles/globals.css'` (or any path alias) now resolves through `tsconfig.json` / `jsconfig.json` `compilerOptions.paths`.
+- **Hover preview** — hover any `className` / `id` to see the matching CSS rule body without leaving the editor. Multi-match preview shows every source.
+- **Better project detection** — recognizes Vite / Next / Remix / Rsbuild / Webpack monorepos where `react` is hoisted by workspaces. Replaces the v1.0.x package.json-only boundary check.
+
+**Setting:**
+- `cssBridge.includeWorkspaceCss` — `true` to include CSS imported anywhere in the project; `false` for strict per-file imports only.
+
+**New commands:**
+- `CSS Bridge: Show Output Log` — open the extension's output channel.
+- `CSS Bridge: Diagnose` — dump scope detection, resolved imports, alias config, workspace CSS pool, and cursor context to the output channel. Paste it when reporting bugs to short-circuit "F12 doesn't jump" speculation.
+
 ### 1.0.1
 
 - **Fix:** `data-id`, `aria-id`, and other `*-id` attributes are no longer falsely matched as `id=`. Same fix prevents `myCustomClassName=` from being treated as `className=`. Affects Jump, Peek, Autocomplete, and Rename.

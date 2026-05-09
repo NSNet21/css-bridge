@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
 import { stripComments } from '../utils/stripComments';
 import { getAttributeAtCursor } from '../parsers/jsxParser';
+import { logV } from '../extension';
 
 // Detect cursor position in a CSS selector (.foo or #foo) — returns token info or null
 function getCssSelectorAtCursor(
@@ -137,6 +138,7 @@ export class CssBridgeRenameProvider implements vscode.RenameProvider {
     position: vscode.Position,
     newName: string,
   ): Promise<vscode.WorkspaceEdit | null> {
+    logV(`[rename] doc=${document.languageId} pos=${position.line}:${position.character} newName="${newName}"`);
     let type: 'class' | 'id';
     let oldName: string;
 
@@ -176,6 +178,8 @@ export class CssBridgeRenameProvider implements vscode.RenameProvider {
         for (const e of fileEdits) locations.push(new vscode.Location(uri, e.range));
       }
     }
+
+    logV(`[rename] type=${type} oldName="${oldName}" totalEdits=${locations.length}`);
 
     // Show References panel after edits are applied so content reflects new names
     if (locations.length > 0) {

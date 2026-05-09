@@ -2,7 +2,7 @@
   "name": "css-bridge",
   "displayName": "CSS Bridge",
   "description": "Jump, peek, create, and rename CSS rules directly from JS/TS/JSX/TSX",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "publisher": "nsnet",
   "license": "MIT",
   "repository": {
@@ -40,6 +40,14 @@
       {
         "command": "cssBridge.createFileAndImport",
         "title": "CSS Bridge: Create CSS File and Import"
+      },
+      {
+        "command": "cssBridge.showOutput",
+        "title": "CSS Bridge: Show Output Log"
+      },
+      {
+        "command": "cssBridge.diagnose",
+        "title": "CSS Bridge: Diagnose"
       }
     ],
     "configuration": {
@@ -59,6 +67,21 @@
           "type": "boolean",
           "default": true,
           "description": "Allow auto-creating CSS file and adding import statement"
+        },
+        "cssBridge.includeWorkspaceCss": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include CSS imported anywhere in the project (not just current file's direct imports). Lets child components see selectors from CSS imported by ancestors (e.g. globals.css imported by App.tsx)."
+        },
+        "cssBridge.verboseLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log every provider call (Definition, Hover, Completion, Rename, CodeAction) to the CSS Bridge output channel. Off by default — turn on when debugging."
+        },
+        "cssBridge.autoDiagnoseOnEditorChange": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run a lightweight Diagnose dump (scope, direct CSS, workspace pool) every time you switch to a JSX/TSX/CSS file. Useful while debugging; off by default to keep the output channel clean."
         }
       }
     },

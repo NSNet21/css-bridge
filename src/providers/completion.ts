@@ -4,7 +4,9 @@ import * as path from 'path';
 import { resolveCssImports } from '../parsers/importResolver';
 import { parseSelectors } from '../parsers/cssParser';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
+import { resolveWorkspaceCss } from '../utils/resolveWorkspaceCss';
 import { stripComments } from '../utils/stripComments';
+import { logV } from '../extension';
 
 function getAttributeContext(
   document: vscode.TextDocument,
@@ -51,28 +53,47 @@ export class JsxCompletionProvider implements vscode.CompletionItemProvider {
     position: vscode.Position
   ): vscode.CompletionItem[] | undefined {
     const ctx = getAttributeContext(document, position);
+    logV(`[completion:jsx] pos=${position.line}:${position.character} ctx=${ctx ? ctx.type : 'null'}`);
     if (!ctx) return;
 
-    const cssFiles = resolveCssImports(document.fileName);
-    if (cssFiles.length === 0) return;
+    // v1.1.0: union of direct imports + workspace CSS so child components see
+    // selectors from CSS imported by ancestors. Direct imports win on dedupe so
+    // their (more specific) source label is preserved.
+    const direct = resolveCssImports(document.fileName);
+    const config = vscode.workspace.getConfiguration('cssBridge');
+    const includeWorkspace = config.get<boolean>('includeWorkspaceCss', true);
+    const workspace = includeWorkspace
+      ? resolveWorkspaceCss(document.fileName).filter(f => !direct.includes(f))
+      : [];
+
+    if (direct.length === 0 && workspace.length === 0) return;
 
     const seen = new Set<string>();
     const items: vscode.CompletionItem[] = [];
 
-    for (const cssFile of cssFiles) {
-      for (const sel of parseSelectors(cssFile)) {
-        if (sel.type !== ctx.type) continue;
-        if (seen.has(sel.rawName)) continue;
-        seen.add(sel.rawName);
+    const collect = (cssFiles: string[], fromWorkspace: boolean) => {
+      for (const cssFile of cssFiles) {
+        for (const sel of parseSelectors(cssFile)) {
+          if (sel.type !== ctx.type) continue;
+          if (seen.has(sel.rawName)) continue;
+          seen.add(sel.rawName);
 
-        const item = new vscode.CompletionItem(sel.rawName, vscode.CompletionItemKind.Value);
-        item.detail = sel.selector;
-        item.documentation = new vscode.MarkdownString(
-          `Defined in \`${path.basename(cssFile)}\``
-        );
-        items.push(item);
+          const item = new vscode.CompletionItem(sel.rawName, vscode.CompletionItemKind.Value);
+          item.detail = sel.selector;
+          item.documentation = new vscode.MarkdownString(
+            fromWorkspace
+              ? `Defined in \`${path.basename(cssFile)}\` (project-wide)`
+              : `Defined in \`${path.basename(cssFile)}\``
+          );
+          // Direct imports sort above workspace fallback for tidy UX
+          item.sortText = (fromWorkspace ? '1_' : '0_') + sel.rawName;
+          items.push(item);
+        }
       }
-    }
+    };
+
+    collect(direct, false);
+    collect(workspace, true);
     return items;
   }
 }
@@ -90,6 +111,7 @@ export class CssCompletionProvider implements vscode.CompletionItemProvider {
     // Pattern: optional whitespace/commas, then '.' or '#', then partial name.
     const classMatch = /^[\s,]*\.[\w-]*$/.test(textBeforeCursor);
     const idMatch    = /^[\s,]*#[\w-]*$/.test(textBeforeCursor);
+    logV(`[completion:css] line="${textBeforeCursor}" classMatch=${classMatch} idMatch=${idMatch}`);
     if (!classMatch && !idMatch) return;
 
     const type = classMatch ? 'class' : 'id';

@@ -4,6 +4,8 @@ import * as path from 'path';
 import { getAttributeAtCursor } from '../parsers/jsxParser';
 import { resolveCssImports } from '../parsers/importResolver';
 import { parseSelectors } from '../parsers/cssParser';
+import { resolveWorkspaceCss } from '../utils/resolveWorkspaceCss';
+import { logV } from '../extension';
 
 export class CssBridgeCodeActionProvider implements vscode.CodeActionProvider {
   provideCodeActions(
@@ -11,14 +13,28 @@ export class CssBridgeCodeActionProvider implements vscode.CodeActionProvider {
     range: vscode.Range,
   ): vscode.CodeAction[] {
     const attr = getAttributeAtCursor(document, range.start);
+    logV(`[codeAction] pos=${range.start.line}:${range.start.character} attr=${JSON.stringify(attr)}`);
     if (!attr) return [];
 
     const cssFiles = resolveCssImports(document.fileName);
     const actions: vscode.CodeAction[] = [];
+    const config = vscode.workspace.getConfiguration('cssBridge');
+
+    // v1.1.0: before offering to create a brand-new CSS file, check whether the
+    // selector already exists in any project-wide CSS (e.g. parent's globals.css).
+    // If so, suppress all CodeActions — the selector exists, just not in a file
+    // this component directly imports.
+    if (config.get<boolean>('includeWorkspaceCss', true)) {
+      const workspace = resolveWorkspaceCss(document.fileName)
+        .filter(f => !cssFiles.includes(f));
+      const existsInWorkspace = workspace.some(f =>
+        parseSelectors(f).some(s => s.type === attr.type && s.rawName === attr.value)
+      );
+      if (existsInWorkspace) return [];
+    }
 
     if (cssFiles.length === 0) {
       // No CSS import at all — offer to create file + import
-      const config = vscode.workspace.getConfiguration('cssBridge');
       if (config.get<boolean>('autoCreateImport', true)) {
         actions.push(createFileAction(document, attr.value, attr.type));
       }

@@ -4,7 +4,7 @@ import { getAttributeAtCursor } from '../parsers/jsxParser';
 import { findCssLocations } from '../utils/findLocations';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
 import { stripComments } from '../utils/stripComments';
-import { out } from '../extension';
+import { logV } from '../extension';
 
 export function getCssTokenAtCursor(
   document: vscode.TextDocument,
@@ -97,19 +97,19 @@ export class CssBridgeDefinitionProvider implements vscode.DefinitionProvider {
     if (document.languageId === 'css') {
       const token = getCssTokenAtCursor(document, position);
       if (!token) return null;
-      out.appendLine(`[definition] CSS→JSX ${token.type}="${token.value}"`);
+      logV(`[definition] CSS→JSX ${token.type}="${token.value}"`);
       const locs = findJsxLocationsForSelector(document.fileName, token.type, token.value);
-      out.appendLine(`[definition] CSS→JSX found ${locs.length} location(s)`);
+      logV(`[definition] CSS→JSX found ${locs.length} location(s)`);
       return locs.length > 0 ? locs : null;
     }
 
     // JSX/TSX → CSS
     const attr = getAttributeAtCursor(document, position);
-    out.appendLine(`[definition] pos=${position.line}:${position.character} attr=${JSON.stringify(attr)}`);
+    logV(`[definition] pos=${position.line}:${position.character} attr=${JSON.stringify(attr)}`);
     if (!attr) return null;
 
     const locations = findCssLocations(document, attr);
-    out.appendLine(`[definition] found ${locations.length} location(s)`);
+    logV(`[definition] found ${locations.length} location(s)`);
     return locations.length > 0 ? locations : null;
   }
 }
