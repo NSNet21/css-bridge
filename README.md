@@ -56,6 +56,14 @@ Navigate, create, and rename CSS rules directly from your JSX/TSX — without le
 
 ## Release Notes
 
+### 1.0.1
+
+- **Fix:** `data-id`, `aria-id`, and other `*-id` attributes are no longer falsely matched as `id=`. Same fix prevents `myCustomClassName=` from being treated as `className=`. Affects Jump, Peek, Autocomplete, and Rename.
+- **Fix:** Reverse navigation (CSS → JSX, F12 on a `.selector`) and Rename no longer match attribute-shaped text inside JS/JSX comments.
+- **Fix:** CSS-side autocomplete on `#` now returns id suggestions correctly. Items also keep their `.`/`#` prefix on accept (no more dropped or duplicated trigger char).
+- **Feat:** `Ctrl+K Ctrl+P` (Peek) now also works *from* a CSS file — peeks JSX usages of the selector under the cursor.
+- **Perf:** Cache JSX/TSX import resolution by mtime — no more re-parsing with Babel on every cursor move.
+
 ### 1.0.0
 
 Initial release.

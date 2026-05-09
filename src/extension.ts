@@ -10,6 +10,7 @@ import { getAttributeAtCursor } from './parsers/jsxParser';
 import { findCssLocations } from './utils/findLocations';
 import { showDisambiguationPick } from './utils/quickPick';
 import { invalidateCache } from './parsers/cssParser';
+import { invalidateImportCache } from './parsers/importResolver';
 import { openInLocation } from './utils/openFile';
 
 const DOC_SELECTOR: vscode.DocumentSelector = [
@@ -113,6 +114,10 @@ export function activate(context: vscode.ExtensionContext) {
         const doc = await vscode.workspace.openTextDocument(uri);
 
         const endPos = doc.lineAt(doc.lineCount - 1).range.end;
+        // Always prepend "\n" — combined with the file's trailing newline this
+        // yields exactly one blank line between the previous rule and the new
+        // one (CSS convention). Files without a trailing newline get the rule
+        // adjacent to the last content, which is acceptable.
         const rule = `\n${selector} {\n\t\n}\n`;
         const edit = new vscode.WorkspaceEdit();
         edit.insert(uri, endPos, rule);
@@ -122,10 +127,10 @@ export function activate(context: vscode.ExtensionContext) {
         // Do NOT save here — format-on-save would strip the empty indent line,
         // shifting the cursor onto `}` instead of inside the block.
         // Search backwards in the post-edit live doc for the selector we added.
-        let cursorLine = endPos.line + 2; // fallback
+        let cursorLine = Math.min(endPos.line + 2, doc.lineCount - 1); // safe fallback
         for (let i = doc.lineCount - 1; i >= 0; i--) {
           if (doc.lineAt(i).text.trimEnd() === `${selector} {`) {
-            cursorLine = i + 1;
+            cursorLine = Math.min(i + 1, doc.lineCount - 1);
             break;
           }
         }
@@ -215,6 +220,14 @@ export function activate(context: vscode.ExtensionContext) {
     cssWatcher,
     cssWatcher.onDidChange(uri => invalidateCache(uri.fsPath)),
     cssWatcher.onDidDelete(uri => invalidateCache(uri.fsPath)),
+  );
+
+  // Invalidate JSX/TS import cache when source files change
+  const jsxWatcher = vscode.workspace.createFileSystemWatcher('**/*.{js,ts,jsx,tsx}');
+  context.subscriptions.push(
+    jsxWatcher,
+    jsxWatcher.onDidChange(uri => invalidateImportCache(uri.fsPath)),
+    jsxWatcher.onDidDelete(uri => invalidateImportCache(uri.fsPath)),
   );
 }
 

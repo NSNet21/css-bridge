@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { stripComments } from '../utils/stripComments';
 
 export interface AttributeInfo {
   type: 'class' | 'id';
@@ -16,20 +17,20 @@ export function getAttributeAtCursor(
   }
   const word = document.getText(wordRange);
 
-  // Scan backwards from cursor (up to 10 lines) to find opening attribute
+  // Strip comments on the full document first so an unclosed block comment
+  // before the cursor still gets blanked, then take the slice up to cursor.
+  // 10-line backward window keeps the regex test cheap on huge files.
+  const cursorOffset = document.offsetAt(position);
+  const stripped = stripComments(document.getText());
   const searchStart = Math.max(0, position.line - 10);
-  let textBefore = '';
-  for (let i = searchStart; i <= position.line; i++) {
-    const line = document.lineAt(i).text;
-    textBefore += i === position.line
-      ? line.substring(0, position.character)
-      : line + '\n';
-  }
+  const startOffset = document.offsetAt(new vscode.Position(searchStart, 0));
+  const textBefore = stripped.substring(startOffset, cursorOffset);
 
   // Check if cursor is inside className="..." or id="..."
-  // The pattern ensures no closing quote exists between the opening quote and cursor
-  const classMatch = /className\s*=\s*["']([^"']*)$/.test(textBefore);
-  const idMatch = /\bid\s*=\s*["']([^"']*)$/.test(textBefore);
+  // The pattern ensures no closing quote exists between the opening quote and cursor.
+  // Lookbehind (?<![\w-]) prevents false-positives like myClassName=, data-id=, aria-id=.
+  const classMatch = /(?<![\w-])className\s*=\s*["']([^"']*)$/.test(textBefore);
+  const idMatch = /(?<![\w-])id\s*=\s*["']([^"']*)$/.test(textBefore);
 
   if (classMatch) {
     return { type: 'class', value: word, range: wordRange };

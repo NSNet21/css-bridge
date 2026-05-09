@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { getAttributeAtCursor } from '../parsers/jsxParser';
 import { findCssLocations } from '../utils/findLocations';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
+import { stripComments } from '../utils/stripComments';
 import { out } from '../extension';
 
 export function getCssTokenAtCursor(
@@ -51,13 +52,17 @@ export function findJsxLocationsForSelector(
   const files = globFiles(scope, ['.js', '.ts', '.jsx', '.tsx']);
 
   const locations: vscode.Location[] = [];
+  // Lookbehind (?<![\w-]) prevents matching myClassName=, data-id=, aria-id=, etc.
   const pattern = type === 'class'
-    ? /className\s*=\s*["']([^"']*)["']/g
-    : /\bid\s*=\s*["']([^"']*)["']/g;
+    ? /(?<![\w-])className\s*=\s*["']([^"']*)["']/g
+    : /(?<![\w-])id\s*=\s*["']([^"']*)["']/g;
 
   for (const filePath of files) {
-    let content: string;
-    try { content = fs.readFileSync(filePath, 'utf-8'); } catch { continue; }
+    let raw: string;
+    try { raw = fs.readFileSync(filePath, 'utf-8'); } catch { continue; }
+    // Blank-out comments so attribute-shaped text inside `// ...` or `/* ... */`
+    // doesn't show up as a fake JSX usage. Offsets are preserved.
+    const content = stripComments(raw);
 
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;

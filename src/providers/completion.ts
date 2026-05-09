@@ -4,30 +4,33 @@ import * as path from 'path';
 import { resolveCssImports } from '../parsers/importResolver';
 import { parseSelectors } from '../parsers/cssParser';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
+import { stripComments } from '../utils/stripComments';
 
 function getAttributeContext(
   document: vscode.TextDocument,
   position: vscode.Position
 ): { type: 'class' | 'id' } | null {
+  // Strip comments on the full document so commented-out attributes don't
+  // trigger autocomplete suggestions.
+  const cursorOffset = document.offsetAt(position);
+  const stripped = stripComments(document.getText());
   const searchStart = Math.max(0, position.line - 10);
-  let textBefore = '';
-  for (let i = searchStart; i <= position.line; i++) {
-    const line = document.lineAt(i).text;
-    textBefore += i === position.line
-      ? line.substring(0, position.character)
-      : line + '\n';
-  }
-  if (/className\s*=\s*["'][^"']*$/.test(textBefore)) return { type: 'class' };
-  if (/\bid\s*=\s*["'][^"']*$/.test(textBefore)) return { type: 'id' };
+  const startOffset = document.offsetAt(new vscode.Position(searchStart, 0));
+  const textBefore = stripped.substring(startOffset, cursorOffset);
+  // Lookbehind (?<![\w-]) avoids false-matching myClassName=, data-id=, aria-id=, etc.
+  if (/(?<![\w-])className\s*=\s*["'][^"']*$/.test(textBefore)) return { type: 'class' };
+  if (/(?<![\w-])id\s*=\s*["'][^"']*$/.test(textBefore)) return { type: 'id' };
   return null;
 }
 
 function extractNamesFromFile(filePath: string, type: 'class' | 'id'): string[] {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    // Blank-out comments — names mentioned in `// className="foo"` notes
+    // shouldn't pollute the suggestion list.
+    const content = stripComments(fs.readFileSync(filePath, 'utf-8'));
     const pattern = type === 'class'
-      ? /className\s*=\s*["']([^"']+)["']/g
-      : /\bid\s*=\s*["']([^"']+)["']/g;
+      ? /(?<![\w-])className\s*=\s*["']([^"']+)["']/g
+      : /(?<![\w-])id\s*=\s*["']([^"']+)["']/g;
     const names: string[] = [];
     let match;
     while ((match = pattern.exec(content)) !== null) {
@@ -90,8 +93,18 @@ export class CssCompletionProvider implements vscode.CompletionItemProvider {
     if (!classMatch && !idMatch) return;
 
     const type = classMatch ? 'class' : 'id';
+    const prefix = type === 'class' ? '.' : '#';
     const scope = findScopeBoundary(document.fileName);
     const files = globFiles(scope, ['.js', '.ts', '.jsx', '.tsx']);
+
+    // Replace range covers the existing prefix + any partial name the user has typed,
+    // so accepting an item produces e.g. `#main-nav` regardless of whether they typed
+    // just `#` or `#mai`. Without this the `#` would either be dropped or duplicated.
+    const partialMatch = textBeforeCursor.match(/[#.][\w-]*$/);
+    const replaceStart = partialMatch
+      ? new vscode.Position(position.line, position.character - partialMatch[0].length)
+      : position;
+    const replaceRange = new vscode.Range(replaceStart, position);
 
     const seen = new Set<string>();
     const items: vscode.CompletionItem[] = [];
@@ -101,7 +114,12 @@ export class CssCompletionProvider implements vscode.CompletionItemProvider {
         if (seen.has(name)) continue;
         seen.add(name);
         const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Value);
-        item.detail = type === 'class' ? `.${name}` : `#${name}`;
+        item.detail = `${prefix}${name}`;
+        // VS Code filters by `filterText` against what the user typed at the
+        // replace range. Including the prefix makes typing `#m` match `main-nav`.
+        item.filterText = `${prefix}${name}`;
+        item.insertText = `${prefix}${name}`;
+        item.range = replaceRange;
         items.push(item);
       }
     }

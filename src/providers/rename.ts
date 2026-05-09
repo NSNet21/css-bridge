@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
+import { stripComments } from '../utils/stripComments';
 import { getAttributeAtCursor } from '../parsers/jsxParser';
 
 // Detect cursor position in a CSS selector (.foo or #foo) — returns token info or null
@@ -32,15 +33,19 @@ function editsInJsxFile(
   oldName: string,
   newName: string
 ): vscode.TextEdit[] {
-  let content: string;
-  try { content = fs.readFileSync(filePath, 'utf-8'); } catch { return []; }
+  let raw: string;
+  try { raw = fs.readFileSync(filePath, 'utf-8'); } catch { return []; }
+  // Blank-out comments so we don't rename strings like `// className="foo"`
+  // inside JSDoc or scenario notes. Offsets are preserved.
+  const content = stripComments(raw);
 
   const edits: vscode.TextEdit[] = [];
   const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
 
+  // Lookbehind (?<![\w-]) prevents touching myClassName=, data-id=, aria-id=, etc.
   const pattern = type === 'class'
-    ? /className\s*=\s*(["'])([^"']*)\1/g
-    : /\bid\s*=\s*(["'])([^"']*)\1/g;
+    ? /(?<![\w-])className\s*=\s*(["'])([^"']*)\1/g
+    : /(?<![\w-])id\s*=\s*(["'])([^"']*)\1/g;
 
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(content)) !== null) {
