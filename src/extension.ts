@@ -1,16 +1,23 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { CssBridgeDefinitionProvider, getCssTokenAtCursor, findJsxLocationsForSelector } from './providers/definition';
+import {
+  CssBridgeDefinitionProvider,
+  getCssTokenAtCursor,
+  getCssVarAtCursor,
+  findJsxLocationsForSelector,
+  findVarDefLocations,
+  findVarUseLocations,
+} from './providers/definition';
 import { CssBridgeCodeActionProvider } from './providers/codeAction';
 import { JsxCompletionProvider, CssCompletionProvider } from './providers/completion';
 import { CssBridgeRenameProvider } from './providers/rename';
-import { CssBridgeHoverProvider } from './providers/hover';
+import { CssBridgeHoverProvider, CssBridgeCssHoverProvider } from './providers/hover';
 import { peekCssRule } from './providers/peek';
 import { getAttributeAtCursor } from './parsers/jsxParser';
 import { findCssLocations } from './utils/findLocations';
 import { showDisambiguationPick } from './utils/quickPick';
-import { invalidateCache, parseSelectors } from './parsers/cssParser';
+import { invalidateCache, parseSelectors, parseVars, invalidateVarCache } from './parsers/cssParser';
 import { invalidateImportCache, resolveCssImports } from './parsers/importResolver';
 import { invalidateClassIndexCache, indexJsxFile } from './parsers/jsxClassIndex';
 import { invalidateLiveDocCache, prewarmLiveDocCache } from './parsers/jsxParser';
@@ -106,6 +113,32 @@ export function activate(context: vscode.ExtensionContext) {
 
         // CSS → JSX: F12 on .selector / #selector in a CSS file
         if (editor.document.languageId === 'css') {
+          // v1.3.0: var(--foo) / --foo: detection runs first. Same ordering
+          // logic as provideDefinition — var tokens and `.foo` selectors live
+          // in disjoint syntactic contexts, so order is just about which is
+          // checked first. This branch reuses showDisambiguationPick so
+          // multi-theme defs (`:root` + `.theme-dark`) get the QuickPick UX.
+          const cssVar = getCssVarAtCursor(editor.document, editor.selection.active);
+          if (cssVar) {
+            const locs =
+              cssVar.type === 'var-use'
+                ? findVarDefLocations(editor.document.fileName, cssVar.name)
+                : findVarUseLocations(editor.document.fileName, cssVar.name);
+            logV(`[jump] CSS-var ${cssVar.type} "--${cssVar.name}" → ${locs.length} location(s)`);
+            if (locs.length === 0) return;
+            // previewMode: 'same' — var locations point at `--name` on the
+            // declaration/use line itself, so the same line is the meaningful
+            // preview. Selector path below keeps the default 'next' since its
+            // location lands on the selector and the body line below is more
+            // informative than the bare `.foo {` line.
+            const target = locs.length === 1
+              ? locs[0]
+              : await showDisambiguationPick(locs, { previewMode: 'same' });
+            if (!target) return;
+            await openInLocation(target.uri, target.range.start, openLocation);
+            return;
+          }
+
           const token = getCssTokenAtCursor(editor.document, editor.selection.active);
           if (!token) {
             await vscode.commands.executeCommand('editor.action.revealDefinition');
@@ -258,6 +291,15 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
+  // v1.3.0: Hover inside CSS files — `var(--foo)` shows every definition
+  // (multi-theme aware), `--foo:` shows usage count + first sites.
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(
+      { language: 'css' },
+      new CssBridgeCssHoverProvider()
+    )
+  );
+
   // Show Output Log — surfaces the same channel `out` writes to
   context.subscriptions.push(
     vscode.commands.registerCommand('cssBridge.showOutput', () => {
@@ -296,12 +338,19 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Invalidate CSS cache when files change
+  // Invalidate CSS cache when files change. v1.3.0 adds the parallel var
+  // cache — same trigger, different map.
   const cssWatcher = vscode.workspace.createFileSystemWatcher('**/*.css');
   context.subscriptions.push(
     cssWatcher,
-    cssWatcher.onDidChange(uri => invalidateCache(uri.fsPath)),
-    cssWatcher.onDidDelete(uri => invalidateCache(uri.fsPath)),
+    cssWatcher.onDidChange(uri => {
+      invalidateCache(uri.fsPath);
+      invalidateVarCache(uri.fsPath);
+    }),
+    cssWatcher.onDidDelete(uri => {
+      invalidateCache(uri.fsPath);
+      invalidateVarCache(uri.fsPath);
+    }),
   );
 
   // Invalidate JSX/TS import cache when source files change. Workspace CSS
@@ -446,6 +495,32 @@ async function runDiagnose(opts: DiagnoseOpts): Promise<void> {
           out.appendLine(`    - ${h.uri.fsPath}:${h.range.start.line + 1}`);
         }
         if (jsxHits.length > max) out.appendLine(`    … (${jsxHits.length - max} more)`);
+      }
+
+      // v1.3.0: CSS variable summary for this file + cursor-detected var.
+      // Same UX as the selector block — counts up top, cursor-specific detail
+      // below — so a single Diagnose run answers both "is the var index
+      // populated?" and "would my F12 here find anything?".
+      const { defs: vDefs, uses: vUses } = parseVars(activeFp);
+      out.appendLine(`\n  Var defs in this file: ${vDefs.length}, Var uses: ${vUses.length}`);
+
+      const cssVar = getCssVarAtCursor(editor.document, cursorPos);
+      out.appendLine(
+        `  Detected CSS var: ${cssVar ? `--${cssVar.name} (${cssVar.type})` : '(none — not on var(--…) or --…:)'}`
+      );
+      if (cssVar) {
+        const counterLocs =
+          cssVar.type === 'var-use'
+            ? findVarDefLocations(activeFp, cssVar.name)
+            : findVarUseLocations(activeFp, cssVar.name);
+        const dirLabel = cssVar.type === 'var-use' ? 'Definitions' : 'Usages';
+        out.appendLine(`  ${dirLabel} of --${cssVar.name} (${counterLocs.length}):`);
+        const max = Math.min(counterLocs.length, 10);
+        for (let i = 0; i < max; i++) {
+          const h = counterLocs[i];
+          out.appendLine(`    - ${h.uri.fsPath}:${h.range.start.line + 1}`);
+        }
+        if (counterLocs.length > max) out.appendLine(`    … (${counterLocs.length - max} more)`);
       }
     } else {
       const attr = getAttributeAtCursor(editor.document, cursorPos);

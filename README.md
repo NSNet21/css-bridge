@@ -22,6 +22,8 @@ Navigate, create, and rename CSS rules directly from your JSX/TSX — without le
 
 **Aliased imports** — `import '@/styles/globals.css'` (or any path alias) resolves through your `tsconfig.json` / `jsconfig.json` `compilerOptions.paths`.
 
+**CSS variable jump** — `F12` on `var(--primary)` jumps to its `--primary:` definition. Reverse-nav from the definition lists every `var()` call. Multi-theme defs (e.g. `:root` + `.theme-dark`) trigger a QuickPick so you can pick the right one. Hover shows every definition with its value, or — on a definition — the usage count. Fallback (`var(--primary, blue)`) and nested (`var(--a, var(--b))`) forms both detected.
+
 ---
 
 ## Project-wide Rename
@@ -79,6 +81,20 @@ Run from the Command Palette (`Ctrl+Shift+P`):
 ---
 
 ## Release Notes
+
+### 1.3.0
+
+**New feature — CSS variable jump:**
+- **Forward jump** — `F12` / `Ctrl+Click` on `var(--primary)` lands on its `--primary:` definition. If multiple themes define the same name (`:root` light + `.theme-dark` etc.), the QuickPick disambiguator lists all of them so you can pick.
+- **Reverse navigation** — `F12` on a `--primary:` definition lists every `var(--primary)` call in the project.
+- **Hover preview on `var(--foo)`** — shows every definition: `selector → value · file:line`. Hover on a definition instead summarizes how many places consume it.
+- **Fallback & nested forms** — `var(--primary, blue)` and `var(--a, var(--b))` resolve correctly (the regex captures `--primary` / `--a` / `--b` as separate detections).
+- **Diagnose** now includes per-file `Var defs` / `Var uses` counts plus the cursor-detected var with its forward/reverse target list.
+
+**Internals:**
+- New `parseVars(filePath)` in the CSS parser — postcss `walkDecls` for `--name:` definitions, regex over comment-stripped content for `var(--name)` usages. Cached separately from `parseSelectors` (keeps v1.0–v1.2 selector path untouched).
+- Block comments are stripped to same-length whitespace before the use regex runs, so `/* var(--ghost) */` is correctly ignored without breaking offset math.
+- Scope-bounded via `globFiles(scope, ['.css'])` — vars stay intra-CSS, no JSX index involvement.
 
 ### 1.2.0
 
