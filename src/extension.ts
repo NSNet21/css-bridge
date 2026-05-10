@@ -42,9 +42,16 @@ export function activate(context: vscode.ExtensionContext) {
   // Initial settings snapshot + refresh on change so toggles take effect
   // without a window reload. Done here (top of activate) so anything below
   // that reads these flags sees a sane initial value.
+  //
+  // When verbose flips false→true we surface the output channel — otherwise
+  // logs accumulate silently and users have to run `Show Output Log` to even
+  // notice the toggle worked. The channel is already created above; we just
+  // need to make it visible.
   const refreshSettings = () => {
     const cfg = vscode.workspace.getConfiguration('cssBridge');
-    verboseLogging = cfg.get<boolean>('verboseLogging', false);
+    const next = cfg.get<boolean>('verboseLogging', false);
+    if (next && !verboseLogging) out.show(true);
+    verboseLogging = next;
   };
   refreshSettings();
   context.subscriptions.push(

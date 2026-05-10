@@ -10,11 +10,17 @@ Navigate, create, and rename CSS rules directly from your JSX/TSX — without le
 
 **Jump & Peek** — `F12` on any `className` or `id` to jump to the CSS rule. Split panel by default. `Ctrl+K Ctrl+P` to peek inline. If multiple CSS files match, a picker lets you choose.
 
+**Hover Preview** — hover any `className` or `id` to see the matching CSS rule body in a tooltip. Multi-match shows every source.
+
 **Reverse Navigation** — `F12` on a `.selector` inside a CSS file to find every JSX/TSX file that uses it.
 
 **Auto-create** — `Ctrl+.` on a missing class or id to create the rule (or the whole CSS file + import) and land your cursor inside the block.
 
 **Autocomplete** — Type inside `className=""` for selector suggestions from your imported CSS. Type `.` at the start of a CSS line for class names from your JSX files.
+
+**Workspace CSS Union** — child components see CSS imported by ancestors. `App.tsx` imports `globals.css`, your child component uses `className="container"` without re-importing — Jump / Peek / Hover / Autocomplete all work across the project.
+
+**Aliased imports** — `import '@/styles/globals.css'` (or any path alias) resolves through your `tsconfig.json` / `jsconfig.json` `compilerOptions.paths`.
 
 ---
 
@@ -43,6 +49,21 @@ Navigate, create, and rename CSS rules directly from your JSX/TSX — without le
 |---------|---------|-------------|
 | `cssBridge.openLocation` | `beside` | `beside` = split panel, `active` = replace current tab |
 | `cssBridge.autoCreateImport` | `true` | Allow auto-creating CSS file and import |
+| `cssBridge.includeWorkspaceCss` | `true` | Include CSS imported anywhere in the project (not just the current file's direct imports) — enables the Workspace CSS Union feature |
+| `cssBridge.verboseLogging` | `false` | Log every provider call (Hover, Definition, Completion, Rename, CodeAction) to the output channel for live debugging |
+| `cssBridge.autoDiagnoseOnEditorChange` | `false` | On every JSX/TSX/CSS file you switch to, dump scope, resolved imports, and workspace CSS pool to the output channel |
+
+## Commands
+
+Run from the Command Palette (`Ctrl+Shift+P`):
+
+| Command | Purpose |
+|---------|---------|
+| `CSS Bridge: Jump to CSS Rule` | Same as `F12` — kept for explicit access |
+| `CSS Bridge: Peek CSS Rule` | Same as `Ctrl+K Ctrl+P` |
+| `CSS Bridge: Create CSS Rule` / `Create CSS File and Import` | Internal — invoked by `Ctrl+.` Quick Fix |
+| `CSS Bridge: Show Output Log` | Open the extension's output channel |
+| `CSS Bridge: Diagnose` | Dump scope detection, alias config, direct CSS imports, workspace CSS pool, and cursor context. Paste it when reporting bugs to skip the back-and-forth |
 
 ---
 
@@ -55,6 +76,11 @@ Navigate, create, and rename CSS rules directly from your JSX/TSX — without le
 ---
 
 ## Release Notes
+
+### 1.1.1
+
+- **Polish:** Toggling `cssBridge.verboseLogging` on now surfaces the output channel automatically. Previously the channel was silently writing log entries but stayed hidden until you ran `CSS Bridge: Show Output Log` — confusing if you'd just flipped the setting expecting to see logs.
+- **Docs:** README updated with the v1.1.0 features (Hover Preview, Workspace CSS Union, Aliased imports), new settings, and command reference.
 
 ### 1.1.0
 
