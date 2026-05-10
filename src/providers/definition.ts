@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { getAttributeAtCursor } from '../parsers/jsxParser';
 import { findCssLocations } from '../utils/findLocations';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
-import { stripComments } from '../utils/stripComments';
+import { indexJsxFile, buildLineOffsets, tokenToRange } from '../parsers/jsxClassIndex';
 import { logV } from '../extension';
 
 export function getCssTokenAtCursor(
@@ -35,14 +35,6 @@ export function getCssTokenAtCursor(
   return null;
 }
 
-function offsetToPosition(text: string, offset: number): vscode.Position {
-  let line = 0, col = 0;
-  for (let i = 0; i < offset && i < text.length; i++) {
-    if (text[i] === '\n') { line++; col = 0; } else { col++; }
-  }
-  return new vscode.Position(line, col);
-}
-
 export function findJsxLocationsForSelector(
   cssFilePath: string,
   type: 'class' | 'id',
@@ -52,35 +44,20 @@ export function findJsxLocationsForSelector(
   const files = globFiles(scope, ['.js', '.ts', '.jsx', '.tsx']);
 
   const locations: vscode.Location[] = [];
-  // Lookbehind (?<![\w-]) prevents matching myClassName=, data-id=, aria-id=, etc.
-  const pattern = type === 'class'
-    ? /(?<![\w-])className\s*=\s*["']([^"']*)["']/g
-    : /(?<![\w-])id\s*=\s*["']([^"']*)["']/g;
 
   for (const filePath of files) {
+    const tokens = indexJsxFile(filePath);
+    if (tokens.length === 0) continue;
+    // Filter first so we only build the line table when we actually have hits.
+    const matches = tokens.filter(t => t.type === type && t.value === name);
+    if (matches.length === 0) continue;
+
     let raw: string;
     try { raw = fs.readFileSync(filePath, 'utf-8'); } catch { continue; }
-    // Blank-out comments so attribute-shaped text inside `// ...` or `/* ... */`
-    // doesn't show up as a fake JSX usage. Offsets are preserved.
-    const content = stripComments(raw);
-
-    pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(content)) !== null) {
-      const tokens = match[1].split(/\s+/);
-      if (!tokens.includes(name)) continue;
-
-      const valueStartOffset = match.index + match[0].indexOf(match[1]);
-      let tokenOffset = 0;
-      for (const token of tokens) {
-        if (token === name) {
-          const abs = valueStartOffset + tokenOffset;
-          const start = offsetToPosition(content, abs);
-          const end   = offsetToPosition(content, abs + name.length);
-          locations.push(new vscode.Location(vscode.Uri.file(filePath), new vscode.Range(start, end)));
-        }
-        tokenOffset += token.length + 1;
-      }
+    const lineOffsets = buildLineOffsets(raw);
+    const uri = vscode.Uri.file(filePath);
+    for (const t of matches) {
+      locations.push(new vscode.Location(uri, tokenToRange(t, lineOffsets)));
     }
   }
 

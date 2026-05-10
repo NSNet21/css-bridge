@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { resolveCssImports } from '../parsers/importResolver';
 import { parseSelectors } from '../parsers/cssParser';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
 import { resolveWorkspaceCss } from '../utils/resolveWorkspaceCss';
 import { stripComments } from '../utils/stripComments';
+import { indexJsxFile } from '../parsers/jsxClassIndex';
 import { logV } from '../extension';
 
 function getAttributeContext(
@@ -26,24 +26,11 @@ function getAttributeContext(
 }
 
 function extractNamesFromFile(filePath: string, type: 'class' | 'id'): string[] {
-  try {
-    // Blank-out comments — names mentioned in `// className="foo"` notes
-    // shouldn't pollute the suggestion list.
-    const content = stripComments(fs.readFileSync(filePath, 'utf-8'));
-    const pattern = type === 'class'
-      ? /(?<![\w-])className\s*=\s*["']([^"']+)["']/g
-      : /(?<![\w-])id\s*=\s*["']([^"']+)["']/g;
-    const names: string[] = [];
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      for (const v of match[1].trim().split(/\s+/)) {
-        if (v) names.push(v);
-      }
-    }
-    return names;
-  } catch {
-    return [];
-  }
+  // AST-backed: catches className from template literals, ternaries, clsx() args.
+  // Comments are skipped natively by Babel — no stripComments dance needed.
+  return indexJsxFile(filePath)
+    .filter(t => t.type === type)
+    .map(t => t.value);
 }
 
 // 5.1 — JSX/TSX side: suggest selectors from imported CSS files

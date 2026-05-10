@@ -2,7 +2,7 @@
   "name": "css-bridge",
   "displayName": "CSS Bridge",
   "description": "Jump, peek, create, and rename CSS rules directly from JS/TS/JSX/TSX",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "publisher": "nsnet",
   "license": "MIT",
   "repository": {
@@ -82,6 +82,12 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically run a lightweight Diagnose dump (scope, direct CSS, workspace pool) every time you switch to a JSX/TSX/CSS file. Useful while debugging; off by default to keep the output channel clean."
+        },
+        "cssBridge.classNameHelpers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["clsx", "classnames", "cn", "cx", "twMerge"],
+          "description": "Function names treated as className helpers — their string-literal arguments (and object keys) are scanned alongside `className=\"...\"`. Add custom helpers (e.g. `cva`, `tw`) to extend support to your codebase's conventions."
         }
       }
     },

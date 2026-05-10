@@ -12,6 +12,8 @@ import { findCssLocations } from './utils/findLocations';
 import { showDisambiguationPick } from './utils/quickPick';
 import { invalidateCache, parseSelectors } from './parsers/cssParser';
 import { invalidateImportCache, resolveCssImports } from './parsers/importResolver';
+import { invalidateClassIndexCache, indexJsxFile } from './parsers/jsxClassIndex';
+import { invalidateLiveDocCache, prewarmLiveDocCache } from './parsers/jsxParser';
 import { invalidateWorkspaceCssCache, resolveWorkspaceCss } from './utils/resolveWorkspaceCss';
 import { findScopeBoundary } from './utils/scopeBoundary';
 import { findNearestTsConfig } from './utils/tsconfigResolver';
@@ -305,12 +307,35 @@ export function activate(context: vscode.ExtensionContext) {
   // Invalidate JSX/TS import cache when source files change. Workspace CSS
   // cache uses fingerprint (mtime+count) so it self-heals on next call —
   // we still nuke it on file create/delete to skip the recompute on first hit.
+  // Pre-warm the live AST cache the moment a JSX/TS file becomes visible.
+  // Without this, the *first* F12 on a `className={...}` token pays the full
+  // Babel parse inline (50–200 ms on a real file, worse on battery throttle).
+  // setImmediate keeps the parse off the event-loop tick that delivered the
+  // open event, so the editor opening itself stays snappy.
+  const PREWARM_LANGS = ['javascript', 'typescript', 'javascriptreact', 'typescriptreact'];
+  const schedulePrewarm = (doc: vscode.TextDocument) => {
+    if (!PREWARM_LANGS.includes(doc.languageId)) return;
+    setImmediate(() => prewarmLiveDocCache(doc));
+  };
+  // Editors already open at activation
+  for (const editor of vscode.window.visibleTextEditors) schedulePrewarm(editor.document);
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(schedulePrewarm),
+    vscode.window.onDidChangeActiveTextEditor(e => { if (e) schedulePrewarm(e.document); }),
+  );
+
   const jsxWatcher = vscode.workspace.createFileSystemWatcher('**/*.{js,ts,jsx,tsx}');
   context.subscriptions.push(
     jsxWatcher,
-    jsxWatcher.onDidChange(uri => invalidateImportCache(uri.fsPath)),
+    jsxWatcher.onDidChange(uri => {
+      invalidateImportCache(uri.fsPath);
+      invalidateClassIndexCache(uri.fsPath);
+      invalidateLiveDocCache(uri.fsPath);
+    }),
     jsxWatcher.onDidDelete(uri => {
       invalidateImportCache(uri.fsPath);
+      invalidateClassIndexCache(uri.fsPath);
+      invalidateLiveDocCache(uri.fsPath);
       invalidateWorkspaceCssCache();
     }),
     jsxWatcher.onDidCreate(() => invalidateWorkspaceCssCache()),
@@ -381,22 +406,66 @@ async function runDiagnose(opts: DiagnoseOpts): Promise<void> {
       for (const f of extra) out.appendLine(`    - ${f}`);
     }
 
-    const attr = getAttributeAtCursor(editor.document, editor.selection.active);
-    out.appendLine(`\n  Cursor at ${editor.selection.active.line}:${editor.selection.active.character}`);
-    out.appendLine(`  Detected attribute: ${attr ? `${attr.type}="${attr.value}"` : '(none — not on a className/id token)'}`);
+    // v1.2.0: index summary so users can see whether the AST walker is picking
+    // up dynamic className expressions (template literals, ternaries, helpers).
+    // If the count of attr-expr/helper here is 0 in a file you know uses them,
+    // the parse failed silently — copy the file content into a Babel REPL.
+    if (editor.document.languageId !== 'css') {
+      const tokens = indexJsxFile(activeFp);
+      const byKind = { 'attr-string': 0, 'attr-expr': 0, 'helper': 0 };
+      for (const t of tokens) byKind[t.source]++;
+      out.appendLine(
+        `\n  Class index (${tokens.length} tokens): ` +
+        `attr-string=${byKind['attr-string']}, attr-expr=${byKind['attr-expr']}, helper=${byKind.helper}`
+      );
+      const cfg2 = vscode.workspace.getConfiguration('cssBridge');
+      const helpers = cfg2.get<string[]>('classNameHelpers', ['clsx','classnames','cn','cx','twMerge']);
+      out.appendLine(`  cssBridge.classNameHelpers = [${helpers.join(', ')}]`);
+    }
 
-    if (attr) {
-      const allCss = includeWs ? resolveWorkspaceCss(activeFp) : direct;
-      const hits: string[] = [];
-      for (const cssFile of allCss) {
-        for (const sel of parseSelectors(cssFile)) {
-          if (sel.type === attr.type && sel.rawName === attr.value) {
-            hits.push(`${cssFile}:${sel.line}`);
+    const cursorPos = editor.selection.active;
+    out.appendLine(`\n  Cursor at ${cursorPos.line}:${cursorPos.character}`);
+
+    if (editor.document.languageId === 'css') {
+      // CSS-side: detect `.foo` / `#bar` selector under cursor + reverse-nav
+      // count so users can verify the index reaches their JSX usages without
+      // leaving the diagnose view. Note: auto-diagnose fires on tab switch,
+      // not cursor move — re-run `CSS Bridge: Diagnose` after positioning the
+      // cursor to refresh.
+      const cssToken = getCssTokenAtCursor(editor.document, cursorPos);
+      out.appendLine(
+        `  Detected selector: ${cssToken ? `${cssToken.type === 'class' ? '.' : '#'}${cssToken.value}` : '(none — not on .selector or #selector)'}`
+      );
+      if (cssToken) {
+        const jsxHits = findJsxLocationsForSelector(activeFp, cssToken.type, cssToken.value);
+        out.appendLine(`  JSX usages of this selector (${jsxHits.length}):`);
+        // Cap to 10 so a 308-hit BigFixture scan doesn't drown the diagnose dump
+        const max = Math.min(jsxHits.length, 10);
+        for (let i = 0; i < max; i++) {
+          const h = jsxHits[i];
+          out.appendLine(`    - ${h.uri.fsPath}:${h.range.start.line + 1}`);
+        }
+        if (jsxHits.length > max) out.appendLine(`    … (${jsxHits.length - max} more)`);
+      }
+    } else {
+      const attr = getAttributeAtCursor(editor.document, cursorPos);
+      out.appendLine(
+        `  Detected attribute: ${attr ? `${attr.type}="${attr.value}" (source=${attr.source})` : '(none — not on a className/id token)'}`
+      );
+
+      if (attr) {
+        const allCss = includeWs ? resolveWorkspaceCss(activeFp) : direct;
+        const hits: string[] = [];
+        for (const cssFile of allCss) {
+          for (const sel of parseSelectors(cssFile)) {
+            if (sel.type === attr.type && sel.rawName === attr.value) {
+              hits.push(`${cssFile}:${sel.line}`);
+            }
           }
         }
+        out.appendLine(`  Matching CSS rules (${hits.length}):`);
+        for (const h of hits) out.appendLine(`    - ${h}`);
       }
-      out.appendLine(`  Matching CSS rules (${hits.length}):`);
-      for (const h of hits) out.appendLine(`    - ${h}`);
     }
   }
 

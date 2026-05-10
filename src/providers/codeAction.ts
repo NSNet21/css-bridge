@@ -12,7 +12,14 @@ export class CssBridgeCodeActionProvider implements vscode.CodeActionProvider {
     document: vscode.TextDocument,
     range: vscode.Range,
   ): vscode.CodeAction[] {
-    const attr = getAttributeAtCursor(document, range.start);
+    // Skip the AST fallback here. CodeAction fires on every cursor move (the
+    // lightbulb), so paying a Babel parse inside `className={...}` would drag
+    // typing on big files. The "Create rule" suggestion is meaningful for the
+    // plain `className="foo"` case where users author class names — for
+    // dynamic shapes (template/ternary/clsx), the missing-class is usually
+    // intentional dynamic logic, not a typo. Hover/F12/Rename still get the
+    // full AST treatment, since those are explicit user actions.
+    const attr = getAttributeAtCursor(document, range.start, { fastOnly: true });
     logV(`[codeAction] pos=${range.start.line}:${range.start.character} attr=${JSON.stringify(attr)}`);
     if (!attr) return [];
 

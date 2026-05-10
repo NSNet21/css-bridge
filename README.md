@@ -52,6 +52,7 @@ Navigate, create, and rename CSS rules directly from your JSX/TSX — without le
 | `cssBridge.includeWorkspaceCss` | `true` | Include CSS imported anywhere in the project (not just the current file's direct imports) — enables the Workspace CSS Union feature |
 | `cssBridge.verboseLogging` | `false` | Log every provider call (Hover, Definition, Completion, Rename, CodeAction) to the output channel for live debugging |
 | `cssBridge.autoDiagnoseOnEditorChange` | `false` | On every JSX/TSX/CSS file you switch to, dump scope, resolved imports, and workspace CSS pool to the output channel |
+| `cssBridge.classNameHelpers` | `["clsx", "classnames", "cn", "cx", "twMerge"]` | Function names treated as className helpers — string-literal arguments and object keys inside calls to these are scanned alongside `className="..."`. Add custom helpers (e.g. `cva`, `tw`) here |
 
 ## Commands
 
@@ -69,13 +70,29 @@ Run from the Command Palette (`Ctrl+Shift+P`):
 
 ## Known Limitations
 
-- Dynamic `className` expressions (`` className={`card--${size}`} ``) are not supported
+- Runtime `${expression}` parts of template literals are dropped — `` `btn-${size}` `` matches `btn-` (partial), not `btn-lg`. Static prefixes/suffixes still work
+- Tagged template helpers (`` tw`...` ``, `` styled`...` ``) and `cva()` config-object form are not detected — add the call name to `cssBridge.classNameHelpers` for plain-call helpers
+- CSS Modules (`styles.btn`) — not supported; needs separate import-resolver rewrite
 - `Ctrl+Space` required after `#` for id completion in CSS (VS Code color picker limitation)
 - `Ctrl+Click` always opens in same group — use `F12` instead
 
 ---
 
 ## Release Notes
+
+### 1.2.0
+
+**New features:**
+- **Dynamic `className` expressions** — Jump / Hover / Rename / Reverse-nav now work inside `className={...}`. Recognised shapes: template literals (`` `btn ${active ? 'is-active' : ''}` ``), ternaries, `&&`/`||`/`??` short-circuits, string concatenation, and arrays/objects nested inside.
+- **`clsx` / `classnames` / `cn` / `cx` / `twMerge` helpers** — string-literal arguments (and object keys like `{ 'btn-active': flag }`) are scanned alongside `className="..."`. Custom helper names extend the list via the new setting.
+
+**Setting:**
+- `cssBridge.classNameHelpers` — array of function names treated as className helpers. Default: `["clsx", "classnames", "cn", "cx", "twMerge"]`. Add your own (e.g. `cva`, project-specific helpers).
+
+**Internals:**
+- New AST-based class index module — single `@babel/parser` walk per file, mtime + document-version cached, replaces the per-feature regex scanners. Keystroke fast-path on plain `className="..."` preserved (no parse cost).
+- **Perf:** Pre-warm parse on file open + 80 ms parse throttle so the first F12 inside `className={...}` doesn't pay the inline parse cost; CodeAction's lightbulb skips the AST fallback to keep typing snappy on big files.
+- Diagnose command now reports class-index counts (`attr-string` / `attr-expr` / `helper`) and the source label of the cursor token, so you can verify dynamic detection without speculation.
 
 ### 1.1.1
 

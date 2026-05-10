@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { findScopeBoundary, globFiles } from '../utils/scopeBoundary';
-import { stripComments } from '../utils/stripComments';
 import { getAttributeAtCursor } from '../parsers/jsxParser';
+import { indexJsxFile, buildLineOffsets, tokenToRange } from '../parsers/jsxClassIndex';
 import { logV } from '../extension';
 
 // Detect cursor position in a CSS selector (.foo or #foo) — returns token info or null
@@ -27,47 +27,36 @@ function getCssSelectorAtCursor(
   return null;
 }
 
-// Find all occurrences of a class/id token in a JSX/TS file and return TextEdits
+// Find all occurrences of a class/id token in a JSX/TS file and return TextEdits.
+// Uses the AST-based index so dynamic className expressions (template literals,
+// ternaries, clsx() args) get renamed too — not just plain `className="..."`.
 function editsInJsxFile(
   filePath: string,
   type: 'class' | 'id',
   oldName: string,
   newName: string
 ): vscode.TextEdit[] {
+  const tokens = indexJsxFile(filePath);
+  const matches = tokens.filter(t => t.type === type && t.value === oldName);
+  if (matches.length === 0) return [];
+
+  // Prefer the live document's positionAt when the file is open — keeps offsets
+  // consistent with anything the user typed since the last disk write. Fallback
+  // to a manual line table for files we'd otherwise have to read twice.
+  const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
+  if (doc) {
+    return matches.map(t =>
+      vscode.TextEdit.replace(
+        new vscode.Range(doc.positionAt(t.start), doc.positionAt(t.end)),
+        newName,
+      ),
+    );
+  }
+
   let raw: string;
   try { raw = fs.readFileSync(filePath, 'utf-8'); } catch { return []; }
-  // Blank-out comments so we don't rename strings like `// className="foo"`
-  // inside JSDoc or scenario notes. Offsets are preserved.
-  const content = stripComments(raw);
-
-  const edits: vscode.TextEdit[] = [];
-  const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
-
-  // Lookbehind (?<![\w-]) prevents touching myClassName=, data-id=, aria-id=, etc.
-  const pattern = type === 'class'
-    ? /(?<![\w-])className\s*=\s*(["'])([^"']*)\1/g
-    : /(?<![\w-])id\s*=\s*(["'])([^"']*)\1/g;
-
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(content)) !== null) {
-    const attrValue = match[2];
-    const tokens = attrValue.split(/\s+/);
-    if (!tokens.includes(oldName)) continue;
-
-    // Find the exact offset of oldName within the attribute value string
-    const valueStart = match.index + match[0].indexOf(match[2]);
-    let tokenOffset = 0;
-    for (const token of tokens) {
-      if (token === oldName) {
-        const absoluteOffset = valueStart + tokenOffset;
-        const startPos = offsetToPosition(content, absoluteOffset, doc);
-        const endPos   = offsetToPosition(content, absoluteOffset + oldName.length, doc);
-        edits.push(vscode.TextEdit.replace(new vscode.Range(startPos, endPos), newName));
-      }
-      tokenOffset += token.length + 1; // +1 for the space
-    }
-  }
-  return edits;
+  const lineOffsets = buildLineOffsets(raw);
+  return matches.map(t => vscode.TextEdit.replace(tokenToRange(t, lineOffsets), newName));
 }
 
 // Find all CSS selector occurrences and return TextEdits
